@@ -10,7 +10,8 @@ dbConn = sqlite3.connect('messenger.db')
 try:
 	dbConn.execute('''CREATE TABLE USERDATA (
 		username char(50) PRIMARY KEY,
-		name char(50), surname char(50),
+		name char(50), 
+		surname char(50),
 		password char(50));''')
 	print("Table created successfully")
 except:
@@ -71,6 +72,13 @@ def sign_in(clientIdentifier, dbHandler):
 			values ('{}', '{}', '{}', '{}')'''.format(username, password, name, surname))
 			userData[username]["clientIdentifier"] = clientIdentifier
 			onlineClients.append(username)	
+			dbHandler.execute('''CREATE TABLE {} (
+				sender char(50), 
+				message char(2000),
+				date text,
+				time text,
+				readreciept int,
+				FOREIGN KEY (sender) REFERENCES USERDATA(username));'''.format(username))
 	return username
 
 def Application(clientIdentifier, counter):
@@ -89,7 +97,7 @@ def Application(clientIdentifier, counter):
 		print("Invalid option!!!\nPlease Try again")	
 		Application(clientIdentifier, 3)
 	
-	destClient = clientIdentifier
+	destClient = userName
 	while True:
 		recvdMsg = clientIdentifier.recv(1024).decode()
 		if recvdMsg == "showOn":
@@ -103,14 +111,16 @@ def Application(clientIdentifier, counter):
 		elif recvdMsg.split()[0] == "change":
 			# chnage destination client identifier
 			if recvdMsg.split()[1] in userData.keys():
-				destClient = userData[recvdMsg.split()[1]]["clientIdentifier"]
+				destClient = recvdMsg.split()[1]
 				continue
 		elif recvdMsg == "_exit_":
 			onlineClients.remove(userName)
 			print("Connection terminated for", userName)
 			# applicationThread[counter].join()
 			break
-		destClient.send(recvdMsg.encode())
+		# destClient.send(recvdMsg.encode())
+		dbHandler.execute('''INSERT INTO {} VALUES ('{}', '{}', date(DATETIME('now')), time(DATETIME('now')), 0)'''.format(destClient, userName, recvdMsg))
+		dbHandler.commit()
 
 try:
 	# Creates a socket and if it fails, it will raise an error
