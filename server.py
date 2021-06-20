@@ -1,12 +1,13 @@
+from os import name
 import socket
 import threading
 import sqlite3
 
-userData = dict()
 onlineClients = list()
 applicationThread = list()
 
 dbConn = sqlite3.connect('messenger.db')
+
 try:
 	dbConn.execute('''CREATE TABLE USERDATA (
 		username char(50) PRIMARY KEY,
@@ -16,9 +17,10 @@ try:
 	print("Table created successfully")
 except:
 	pass
+
 dbConn.close()
 
-def log_in(clientIdentifier, trialCounter, dbHandler):
+def log_in(clientIdentifier, trialCounter, dbHandler, unreadMsgs, unreadChats):
 	clientIdentifier.send("Enter your username: ".encode())
 	username = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Enter your password: ".encode())
@@ -26,24 +28,26 @@ def log_in(clientIdentifier, trialCounter, dbHandler):
 	trialCounter -= 1
 	dbHandler.execute("SELECT password from USERDATA where username='{}'".format(username))
 	passwordList = dbHandler.fetchall()
+	# Check whether passwordList>0.... To be done
 	if passwordList[0][0] == password:
 		clientIdentifier.send("Log in successfull!!!".encode())
 		onlineClients.append(username)
-		try:
-			userData[username]["clientIdentifier"] = clientIdentifier
-		except:
-			userData[username] = dict()
-			userData[username]["clientIdentifier"] = clientIdentifier
-		return username
+		dbHandler.execute('''SELECT COUNT(DISTINCT sender), COUNT(sender) from {} 
+		where readreciept = 0;'''.format(username))
+		readReport = dbHandler.fetchall()
+		clientIdentifier.send('''You have {} unread messages from {} chats.'''.format(readReport[0][1], readReport[0][0]).encode())
+		unreadMsgs = int(readReport[0][1])
+		unreadChats = int(readReport[0][0])
+
 	elif trialCounter >= 0:
 		clientIdentifier.send("Invalid credentials!!!\nAttempts left: {}".format(trialCounter).encode())
-		log_in(clientIdentifier, trialCounter)
+		username = log_in(clientIdentifier, trialCounter, dbHandler, unreadMsgs, unreadChats)
 	else:
 		clientIdentifier.send("No attempts left try again after sometime!!!".encode())
 		return False
+	return username
 
 def sign_in(clientIdentifier, dbHandler):
-	
 	clientIdentifier.send("Please write your first name: ".encode())
 	name = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Please write your surname: ".encode())
@@ -54,7 +58,7 @@ def sign_in(clientIdentifier, dbHandler):
 	usernameList = dbHandler.fetchall()
 	if len(usernameList) > 0:
 		clientIdentifier.send("Username not available!!!\nTry different one".encode())
-		sign_in(clientIdentifier, dbHandler)
+		username = sign_in(clientIdentifier, dbHandler)
 	else:
 		clientIdentifier.send("Password: ".encode())
 		password = str(clientIdentifier.recv(1024).decode()).strip()
@@ -64,13 +68,13 @@ def sign_in(clientIdentifier, dbHandler):
 		
 		if password != confirmPassword:
 			clientIdentifier.send("Passwords did not match!!!".encode())
-			sign_in(clientIdentifier, dbHandler)
+			username = sign_in(clientIdentifier, dbHandler)
 		else:
 			clientIdentifier.send(str("Registration successfull!!!\nWelcome " + username).encode())
-			userData[username] = dict()
+			
 			dbHandler.execute('''INSERT INTO USERDATA (username, password, name, surname) 
 			values ('{}', '{}', '{}', '{}')'''.format(username, password, name, surname))
-			userData[username]["clientIdentifier"] = clientIdentifier
+			
 			onlineClients.append(username)	
 			dbHandler.execute('''CREATE TABLE {} (
 				sender char(50), 
@@ -79,16 +83,18 @@ def sign_in(clientIdentifier, dbHandler):
 				time text,
 				readreciept int,
 				FOREIGN KEY (sender) REFERENCES USERDATA(username));'''.format(username))
+			
 	return username
 
 def Application(clientIdentifier, counter):
 	clientIdentifier.send("Select desired alternatives:\n1: to log in\n2: to sign in\nYour choice: ".encode())
 	dbHandler = sqlite3.connect('messenger.db')
 	login_or_signin = clientIdentifier.recv(1024).decode()
+	unreadMsgs = 0
+	unreadChats = 0
 	if int(login_or_signin) == 1:
-		userName = log_in(clientIdentifier, 3, dbHandler.cursor())
+		userName = log_in(clientIdentifier, 3, dbHandler.cursor(), unreadMsgs, unreadChats)
 		if not userName:
-			# applicationThread[counter].join()
 			return
 	elif int(login_or_signin) == 2:
 		userName = sign_in(clientIdentifier, dbHandler.cursor())
@@ -98,28 +104,51 @@ def Application(clientIdentifier, counter):
 		Application(clientIdentifier, 3)
 	
 	destClient = userName
+	dbCursor = dbHandler.cursor()
 	while True:
-		recvdMsg = clientIdentifier.recv(1024).decode()
+
+		recvdMsg = clientIdentifier.recv(1024).decode().strip()
+		
 		if recvdMsg == "showOn":
 			separator = '\n'
 			clientIdentifier.send(separator.join(onlineClients).encode())
 			continue
+
 		elif recvdMsg == "showAll":
 			separator = '\n'
-			clientIdentifier.send(separator.join(userData.keys()).encode())
+			dbCursor.execute("""SELECT username FROM USERDATA;""")
+			allUsers = dbCursor.fetchall()
+			users = lambda x: [i[0] for i in x]
+			clientIdentifier.send(separator.join(users(allUsers)).encode())
 			continue
+
 		elif recvdMsg.split()[0] == "change":
 			# chnage destination client identifier
-			if recvdMsg.split()[1] in userData.keys():
+			dbCursor.execute('SELECT username FROM USERDATA;')
+			allUsers = dbCursor.fetchall()
+			users = lambda x: [i[0] for i in x]
+			if recvdMsg.split()[1] in users(allUsers): # To be replaced by a SQL statement
 				destClient = recvdMsg.split()[1]
+				dbCursor.execute("SELECT COUNT(readreciept) FROM {} WHERE sender = '{}';".format(userName, destClient))
+				msgsfromsender = int(dbCursor.fetchall()[0][0])
+				dbCursor.execute("UPDATE {} SET readreciept = 1 WHERE sender = '{}';".format(userName, destClient))
+				unreadMsgs -= msgsfromsender
+				unreadChats -= 1
 				continue
+
 		elif recvdMsg == "_exit_":
 			onlineClients.remove(userName)
 			print("Connection terminated for", userName)
-			# applicationThread[counter].join()
 			break
-		# destClient.send(recvdMsg.encode())
-		dbHandler.execute('''INSERT INTO {} VALUES ('{}', '{}', date(DATETIME('now')), time(DATETIME('now')), 0)'''.format(destClient, userName, recvdMsg))
+		
+		elif recvdMsg == "checkNewMsgs":
+			dbCursor.execute('''SELECT COUNT(DISTINCT sender), COUNT(sender) from {} 
+			where readreciept = 0;'''.format(userName))
+			readReport = dbCursor.fetchall()
+			clientIdentifier.send('''You have {} unread messages from {} chats.'''.format(readReport[0][1], readReport[0][0]).encode())
+			continue
+		
+		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', date(DATETIME('now')), time(DATETIME('now', 'localtime')), 0)'''.format(destClient, userName, recvdMsg))
 		dbHandler.commit()
 
 try:
@@ -131,6 +160,7 @@ except socket.error:
 
 # Default port for server 
 portNo = 4444
+# Check what if port 4444 is already in use..?
 
 # Bind the socket
 try:
@@ -149,7 +179,6 @@ except socket.error:
 counter = 0
 
 while True:
-	# Will put here
 	try:
 		clientConnection, clientAddr = serverSocket.accept()
 		print("Connection established successfully")
