@@ -1,64 +1,66 @@
 from os import name
 import socket
 import threading
-import sqlite3
+import psycopg2
 
 onlineClients = list()
 applicationThread = list()
 
-dbConn = sqlite3.connect('messenger.db')
+dbConn = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
 
 try:
-	dbConn.execute('''CREATE TABLE USERDATA (
-		username char(50) PRIMARY KEY,
-		name char(50), 
-		surname char(50),
-		password char(50));''')
+	dbCursor = dbConn.cursor()
+	dbCursor.execute('''CREATE TABLE USERDATA (
+		username text PRIMARY KEY,
+		name text, 
+		surname text,
+		password text);''')
+	dbConn.commit()
 	print("Table created successfully")
 except:
 	pass
 
 dbConn.close()
 
-def log_in(clientIdentifier, trialCounter, dbHandler, unreadMsgs, unreadChats):
+def log_in(clientIdentifier, trialCounter, dbCursor, unreadMsgs, unreadChats):
 	clientIdentifier.send("Enter your username: ".encode())
 	username = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Enter your password: ".encode())
 	password = str(clientIdentifier.recv(1024).decode()).strip()
 	trialCounter -= 1
-	dbHandler.execute("SELECT password from USERDATA where username='{}'".format(username))
-	passwordList = dbHandler.fetchall()
+	dbCursor.execute("SELECT password from USERDATA where username='{}'".format(username))
+	passwordList = dbCursor.fetchall()
 	# Check whether passwordList>0.... To be done
-	if passwordList[0][0] == password:
+	if len(passwordList) > 0 and passwordList[0][0] == password:
 		clientIdentifier.send("Log in successfull!!!".encode())
 		onlineClients.append(username)
-		dbHandler.execute('''SELECT COUNT(DISTINCT sender), COUNT(sender) from {} 
+		dbCursor.execute('''SELECT COUNT(DISTINCT sender), COUNT(sender) from {} 
 		where readreciept = 0;'''.format(username))
-		readReport = dbHandler.fetchall()
+		readReport = dbCursor.fetchall()
 		clientIdentifier.send('''You have {} unread messages from {} chats.'''.format(readReport[0][1], readReport[0][0]).encode())
 		unreadMsgs = int(readReport[0][1])
 		unreadChats = int(readReport[0][0])
 
 	elif trialCounter >= 0:
 		clientIdentifier.send("Invalid credentials!!!\nAttempts left: {}".format(trialCounter).encode())
-		username = log_in(clientIdentifier, trialCounter, dbHandler, unreadMsgs, unreadChats)
+		username = log_in(clientIdentifier, trialCounter, dbCursor, unreadMsgs, unreadChats)
 	else:
 		clientIdentifier.send("No attempts left try again after sometime!!!".encode())
 		return False
 	return username
 
-def sign_in(clientIdentifier, dbHandler):
+def sign_in(clientIdentifier, dbCursor):
 	clientIdentifier.send("Please write your first name: ".encode())
 	name = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Please write your surname: ".encode())
 	surname = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Please write a username for yourself: ".encode())
 	username = str(clientIdentifier.recv(1024).decode()).strip()
-	dbHandler.execute("SELECT username from USERDATA where username ='{}'".format(username))
-	usernameList = dbHandler.fetchall()
+	dbCursor.execute("SELECT username from USERDATA where username ='{}'".format(username))
+	usernameList = dbCursor.fetchall()
 	if len(usernameList) > 0:
 		clientIdentifier.send("Username not available!!!\nTry different one".encode())
-		username = sign_in(clientIdentifier, dbHandler)
+		username = sign_in(clientIdentifier, dbCursor)
 	else:
 		clientIdentifier.send("Password: ".encode())
 		password = str(clientIdentifier.recv(1024).decode()).strip()
@@ -68,17 +70,17 @@ def sign_in(clientIdentifier, dbHandler):
 		
 		if password != confirmPassword:
 			clientIdentifier.send("Passwords did not match!!!".encode())
-			username = sign_in(clientIdentifier, dbHandler)
+			username = sign_in(clientIdentifier, dbCursor)
 		else:
 			clientIdentifier.send(str("Registration successfull!!!\nWelcome " + username).encode())
 			
-			dbHandler.execute('''INSERT INTO USERDATA (username, password, name, surname) 
+			dbCursor.execute('''INSERT INTO USERDATA (username, password, name, surname) 
 			values ('{}', '{}', '{}', '{}')'''.format(username, password, name, surname))
 			
 			onlineClients.append(username)	
-			dbHandler.execute('''CREATE TABLE {} (
-				sender char(50), 
-				message char(2000),
+			dbCursor.execute('''CREATE TABLE {} (
+				sender text, 
+				message text,
 				date text,
 				time text,
 				readreciept int,
@@ -88,23 +90,23 @@ def sign_in(clientIdentifier, dbHandler):
 
 def Application(clientIdentifier, counter):
 	clientIdentifier.send("Select desired alternatives:\n1: to log in\n2: to sign in\nYour choice: ".encode())
-	dbHandler = sqlite3.connect('messenger.db')
+	dbHandler = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
+	dbCursor = dbHandler.cursor()
 	login_or_signin = clientIdentifier.recv(1024).decode()
 	unreadMsgs = 0
 	unreadChats = 0
 	if int(login_or_signin) == 1:
-		userName = log_in(clientIdentifier, 3, dbHandler.cursor(), unreadMsgs, unreadChats)
+		userName = log_in(clientIdentifier, 3, dbCursor, unreadMsgs, unreadChats)
 		if not userName:
 			return
 	elif int(login_or_signin) == 2:
-		userName = sign_in(clientIdentifier, dbHandler.cursor())
+		userName = sign_in(clientIdentifier, dbCursor)
 		dbHandler.commit()
 	else:
 		print("Invalid option!!!\nPlease Try again")	
 		Application(clientIdentifier, 3)
 	
 	destClient = userName
-	dbCursor = dbHandler.cursor()
 	while True:
 
 		recvdMsg = clientIdentifier.recv(1024).decode().strip()
@@ -148,7 +150,7 @@ def Application(clientIdentifier, counter):
 			clientIdentifier.send('''You have {} unread messages from {} chats.'''.format(readReport[0][1], readReport[0][0]).encode())
 			continue
 		
-		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', date(DATETIME('now')), time(DATETIME('now', 'localtime')), 0)'''.format(destClient, userName, recvdMsg))
+		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', CURRENT_DATE, LOCALTIME, 0)'''.format(destClient, userName, recvdMsg))
 		dbHandler.commit()
 
 try:
