@@ -1,36 +1,50 @@
-from os import name
+# from os import name
 import socket
 import threading
 import psycopg2
+import select
 
+
+# A list to hold names of users those are online
 onlineClients = list()
+
+# A list containing thread ids of each connection thread
 applicationThread = list()
 
+# Database connector
 dbConn = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
+dbConn.autocommit = True
+dbCursor = dbConn.cursor()
 
-try:
-	dbCursor = dbConn.cursor()
+# Creates a table that holds each registered user's credentials
+try:	
 	dbCursor.execute('''CREATE TABLE USERDATA (
 		username text PRIMARY KEY,
 		name text, 
 		surname text,
 		password text);''')
 	dbConn.commit()
-	print("Table created successfully")
 except:
-	pass
+	print("Error in Creation of Table 'Userdata' or It already exists.") 
 
 dbConn.close()
 
+# To hndle the login process
 def log_in(clientIdentifier, trialCounter, dbCursor, unreadMsgs, unreadChats):
 	clientIdentifier.send("Enter your username: ".encode())
 	username = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Enter your password: ".encode())
 	password = str(clientIdentifier.recv(1024).decode()).strip()
+
+	# trialcounter keeps the track of attempts made to login...
+	# MAX attemps allowed = 3
 	trialCounter -= 1
+
 	dbCursor.execute("SELECT password from USERDATA where username='{}'".format(username))
 	passwordList = dbCursor.fetchall()
-	# Check whether passwordList>0.... To be done
+
+	# passwordList contains password of user that is stored in DB IF IT EXISTS!!!
+	# If length is greater than 0 that means user exists and then the password is matched
 	if len(passwordList) > 0 and passwordList[0][0] == password:
 		clientIdentifier.send("Log in successfull!!!".encode())
 		onlineClients.append(username)
@@ -49,18 +63,23 @@ def log_in(clientIdentifier, trialCounter, dbCursor, unreadMsgs, unreadChats):
 		return False
 	return username
 
-def sign_in(clientIdentifier, dbCursor):
+# To carry out the process of signing in
+def sign_in(clientIdentifier, dbConn):
+	dbCursor = dbConn.cursor()
 	clientIdentifier.send("Please write your first name: ".encode())
 	name = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Please write your surname: ".encode())
 	surname = str(clientIdentifier.recv(1024).decode()).strip()
 	clientIdentifier.send("Please write a username for yourself: ".encode())
 	username = str(clientIdentifier.recv(1024).decode()).strip()
-	dbCursor.execute("SELECT username from USERDATA where username ='{}'".format(username))
+	dbCursor.execute("SELECT COUNT(username) from USERDATA where username ='{}'".format(username))
 	usernameList = dbCursor.fetchall()
-	if len(usernameList) > 0:
+
+	# usernameList contains the count of users having same username to currentlr registering 
+	# If it is more than 0 then the username is declined and requested to enter another username 
+	if int(usernameList) > 0:
 		clientIdentifier.send("Username not available!!!\nTry different one".encode())
-		username = sign_in(clientIdentifier, dbCursor)
+		username = sign_in(clientIdentifier, dbConn)
 	else:
 		clientIdentifier.send("Password: ".encode())
 		password = str(clientIdentifier.recv(1024).decode()).strip()
@@ -70,52 +89,105 @@ def sign_in(clientIdentifier, dbCursor):
 		
 		if password != confirmPassword:
 			clientIdentifier.send("Passwords did not match!!!".encode())
-			username = sign_in(clientIdentifier, dbCursor)
+			username = sign_in(clientIdentifier, dbConn)
 		else:
-			clientIdentifier.send(str("Registration successfull!!!\nWelcome " + username).encode())
 			
 			dbCursor.execute('''INSERT INTO USERDATA (username, password, name, surname) 
 			values ('{}', '{}', '{}', '{}')'''.format(username, password, name, surname))
 			
 			onlineClients.append(username)	
-			dbCursor.execute('''CREATE TABLE {} (
+
+			# A relation for each registered user is created to store its data
+			dbCursor.execute(f'''CREATE TABLE {username} (
 				sender text, 
 				message text,
 				date text,
 				time text,
 				readreciept int,
-				FOREIGN KEY (sender) REFERENCES USERDATA(username));'''.format(username))
+				timestamp TIMESTAMP,
+				FOREIGN KEY (sender) REFERENCES USERDATA(username));''')
 			
+			# A function that notifies the user if he is online and a new message is there for him
+			# The function is called by a trigger which gets triggered on insertion on its table
+			dbCursor.execute(f"""
+			CREATE OR REPLACE FUNCTION notifier_{username}()
+			RETURNS trigger AS $$
+			DECLARE
+			BEGIN
+				NOTIFY {username}, 'You have a new message!!!';
+			RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+
+			CREATE TRIGGER notify_trigger_{username}
+			AFTER INSERT ON {username}
+			FOR EACH ROW
+			EXECUTE PROCEDURE notifier_{username}();
+			""")
+			print("User Registered Successfully!!!")
+			dbConn.commit()
 	return username
 
-def Application(clientIdentifier, counter):
+# to continuously listen the database and notify the user if a new message is there for him
+# Execued within a separate thread
+def Notifier(username, clientIdentifier):
+	Conn = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
+	Conn.autocommit = True
+	Cursor = Conn.cursor()
+	Cursor.execute(f"LISTEN {username};")
+	while True:
+		if select.select([Conn], [], [], 5) != ([], [], []):
+			Conn.poll()
+			while Conn.notifies:
+				notify = Conn.notifies.pop(0)
+				clientIdentifier.send(str(notify.payload).encode())
+				Conn.commit()
+
+# Function to handle a particular client connection
+def Application(clientIdentifier):
 	clientIdentifier.send("Select desired alternatives:\n1: to log in\n2: to sign in\nYour choice: ".encode())
 	dbHandler = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
 	dbCursor = dbHandler.cursor()
 	login_or_signin = clientIdentifier.recv(1024).decode()
+
+	# Keeps the track of unseen messages
 	unreadMsgs = 0
+
+	# Keeps the trsack of unread chats
 	unreadChats = 0
+
 	if int(login_or_signin) == 1:
 		userName = log_in(clientIdentifier, 3, dbCursor, unreadMsgs, unreadChats)
 		if not userName:
 			return
 	elif int(login_or_signin) == 2:
-		userName = sign_in(clientIdentifier, dbCursor)
+		userName = sign_in(clientIdentifier, dbHandler)
 		dbHandler.commit()
 	else:
 		print("Invalid option!!!\nPlease Try again")	
 		Application(clientIdentifier, 3)
 	
-	destClient = userName
+	# Initiates Notifier thread
+	notifierThread = threading.Thread(target=Notifier, args=(userName, clientIdentifier,))
+	notifierThread.start()
+
+	# destclient is the client to whom message is supposed to be sent
+	# Its default value is user himself 
+	# To change it, use "change <username>" statement  
+	destclient = userName
+
 	while True:
 
+		# stores response from client
 		recvdMsg = clientIdentifier.recv(1024).decode().strip()
 		
+		# showOn displays all the online clients
 		if recvdMsg == "showOn":
 			separator = '\n'
 			clientIdentifier.send(separator.join(onlineClients).encode())
 			continue
 
+		# showAll displays all the registered clients
 		elif recvdMsg == "showAll":
 			separator = '\n'
 			dbCursor.execute("""SELECT username FROM USERDATA;""")
@@ -124,25 +196,28 @@ def Application(clientIdentifier, counter):
 			clientIdentifier.send(separator.join(users(allUsers)).encode())
 			continue
 
+		# change used to destClient
+		# It also marks all the messages from destClients as seen
 		elif recvdMsg.split()[0] == "change":
-			# chnage destination client identifier
 			dbCursor.execute('SELECT username FROM USERDATA;')
 			allUsers = dbCursor.fetchall()
 			users = lambda x: [i[0] for i in x]
-			if recvdMsg.split()[1] in users(allUsers): # To be replaced by a SQL statement
-				destClient = recvdMsg.split()[1]
-				dbCursor.execute("SELECT COUNT(readreciept) FROM {} WHERE sender = '{}';".format(userName, destClient))
+			if recvdMsg.split()[1] in users(allUsers): 
+				destclient= recvdMsg.split()[1]
+				dbCursor.execute("SELECT COUNT(readreciept) FROM {} WHERE sender = '{}';".format(userName, destclient))
 				msgsfromsender = int(dbCursor.fetchall()[0][0])
-				dbCursor.execute("UPDATE {} SET readreciept = 1 WHERE sender = '{}';".format(userName, destClient))
+				dbCursor.execute("UPDATE {} SET readreciept = 1 WHERE sender = '{}';".format(userName, destclient))
 				unreadMsgs -= msgsfromsender
 				unreadChats -= 1
 				continue
 
+		# To close the connection
 		elif recvdMsg == "_exit_":
 			onlineClients.remove(userName)
 			print("Connection terminated for", userName)
 			break
 		
+		# To get brief of unseen messages from various chats
 		elif recvdMsg == "checkNewMsgs":
 			dbCursor.execute('''SELECT COUNT(DISTINCT sender), COUNT(sender) from {} 
 			where readreciept = 0;'''.format(userName))
@@ -150,35 +225,35 @@ def Application(clientIdentifier, counter):
 			clientIdentifier.send('''You have {} unread messages from {} chats.'''.format(readReport[0][1], readReport[0][0]).encode())
 			continue
 		
-		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', CURRENT_DATE, LOCALTIME, 0)'''.format(destClient, userName, recvdMsg))
+		# Each message is storeed in respective user's table
+		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', CURRENT_DATE, LOCALTIME, 0, LOCALTIMESTAMP)'''.format(destclient, userName, recvdMsg))
 		dbHandler.commit()
 
 try:
 	# Creates a socket and if it fails, it will raise an error
 	serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	print("Socket creation successfull!!!")
-except socket.error:
-	print("Socket creation failed with error", str(socket.error))
+except socket.error as err:
+	print("Socket creation failed with error", str(err))
 
 # Default port for server 
 portNo = 4444
-# Check what if port 4444 is already in use..?
+
 
 # Bind the socket
 try:
-	serverSocket.bind(("192.168.1.205", portNo))
-	print("Socket has been binded at the port 4444")
-except socket.error:
-	print("Failed to Bind the socket with error", str(socket.error))
+	serverSocket.bind(("192.168.1.206", portNo))
+	print("Socket has been bound at the port 4444")
+except socket.error as err:
+	print("Failed to Bind the socket with error", str(err))
 
 # Put the socket in the passive mode
 try:
 	serverSocket.listen(10)
 	print("Server is listening")
-except socket.error:
-	print("Failed to listen with error", socket.error)
+except socket.error as err:
+	print("Failed to listen with error", str(err))
 
-counter = 0
 
 while True:
 	try:
@@ -187,6 +262,5 @@ while True:
 	except socket.error:
 		print("Connection failed with error", socket.error)
 
-	applicationThread.append(threading.Thread(target=Application, args=(clientConnection, counter,)))
-	applicationThread[counter].start()
-	counter += 1
+	applicationThread.append(threading.Thread(target=Application, args=(clientConnection,)))
+	applicationThread[len(applicationThread)-1].start()
