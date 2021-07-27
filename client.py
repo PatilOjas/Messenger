@@ -1,10 +1,20 @@
 import socket
 import threading
+from plyer import notification
 
 # A thread operated function continuously printing the server response
 def recieverThread(clientSocket):
 	while True:
-		print(clientSocket.recv(1024).decode())
+		recvdMsg = clientSocket.recv(1024).decode()
+		if recvdMsg == "tlokidz_-b^zkcr-fpc9(jq$-&et)m7f_8^ys3&sdnbt&*dqoj":
+			notification.notify(
+				title = "Messenger",
+				message = "You have got a new message!!!",
+				timeout = 1
+			)
+
+		else:
+			print(recvdMsg)
 
 try:
 	# Creates a socket and if it fails, it will raise an error

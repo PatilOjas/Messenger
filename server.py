@@ -56,7 +56,7 @@ def log_in(clientIdentifier, trialCounter, dbCursor, unreadMsgs, unreadChats):
 		unreadChats = int(readReport[0][0])
 
 	elif trialCounter >= 0:
-		clientIdentifier.send("Invalid credentials!!!\nAttempts left: {}".format(trialCounter).encode())
+		clientIdentifier.send("Invalid credentials!!!\nAttempts left: {}\n".format(trialCounter).encode())
 		username = log_in(clientIdentifier, trialCounter, dbCursor, unreadMsgs, unreadChats)
 	else:
 		clientIdentifier.send("No attempts left try again after sometime!!!".encode())
@@ -140,7 +140,8 @@ def Notifier(username, clientIdentifier):
 			Conn.poll()
 			while Conn.notifies:
 				notify = Conn.notifies.pop(0)
-				clientIdentifier.send(str(notify.payload).encode())
+				# clientIdentifier.send(str(notify.payload).encode())
+				clientIdentifier.send("tlokidz_-b^zkcr-fpc9(jq$-&et)m7f_8^ys3&sdnbt&*dqoj".encode())
 				Conn.commit()
 
 # Function to handle a particular client connection
