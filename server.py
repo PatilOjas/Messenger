@@ -77,7 +77,7 @@ def sign_in(clientIdentifier, dbConn):
 
 	# usernameList contains the count of users having same username to currentlr registering 
 	# If it is more than 0 then the username is declined and requested to enter another username 
-	if int(usernameList) > 0:
+	if int(usernameList[0][0]) > 0:
 		clientIdentifier.send("Username not available!!!\nTry different one".encode())
 		username = sign_in(clientIdentifier, dbConn)
 	else:
@@ -114,7 +114,7 @@ def sign_in(clientIdentifier, dbConn):
 			RETURNS trigger AS $$
 			DECLARE
 			BEGIN
-				NOTIFY {username}, 'You have a new message!!!';
+				PERFORM pg_notify('{username.lower()}', row_to_json(NEW)::text );
 			RETURN NEW;
 			END;
 			$$ LANGUAGE plpgsql;
@@ -134,14 +134,13 @@ def Notifier(username, clientIdentifier):
 	Conn = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
 	Conn.autocommit = True
 	Cursor = Conn.cursor()
-	Cursor.execute(f"LISTEN {username};")
+	Cursor.execute(f"LISTEN {username.lower()};")
 	while True:
 		if select.select([Conn], [], [], 5) != ([], [], []):
 			Conn.poll()
 			while Conn.notifies:
 				notify = Conn.notifies.pop(0)
-				# clientIdentifier.send(str(notify.payload).encode())
-				clientIdentifier.send("tlokidz_-b^zkcr-fpc9(jq$-&et)m7f_8^ys3&sdnbt&*dqoj".encode())
+				clientIdentifier.send(str(notify.payload).encode())
 				Conn.commit()
 
 # Function to handle a particular client connection

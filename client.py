@@ -1,19 +1,23 @@
+from json.decoder import JSONDecodeError
 import socket
 import threading
 from plyer import notification
+import json
 
 # A thread operated function continuously printing the server response
 def recieverThread(clientSocket):
 	while True:
-		recvdMsg = clientSocket.recv(1024).decode()
-		if recvdMsg == "tlokidz_-b^zkcr-fpc9(jq$-&et)m7f_8^ys3&sdnbt&*dqoj":
+		recvdMsg = str(clientSocket.recv(1024).decode())
+		try:
+			recvdMsg = json.loads(recvdMsg)
 			notification.notify(
-				title = "Messenger",
-				message = "You have got a new message!!!",
+				app_name = "Messenger",
+				app_icon = "./Icon/messenger_icon.ico",
+				title = recvdMsg['sender'],
+				message = recvdMsg['message'],
 				timeout = 1
 			)
-
-		else:
+		except JSONDecodeError:
 			print(recvdMsg)
 
 try:
