@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Kalam:wght@700&display=swap');
+*{
+	margin: 0;
+	box-sizing: border-box;
+}
+
+nav.navBar{
+	display: flex;
+	width: 100vw;
+	flex-direction: row;
+	justify-content: space-evenly;
+	background-color: black;
+}
+
+nav.navBar .navBar-title{
+	font-family: 'Kalam', cursive;
+	color: #FFD700;
+	margin: 2% 10%;
+	font-size: 3.5em;
+	padding: 4% auto;
+	letter-spacing: 1px;
+	align-self: flex-start;
+}
+
+nav.navBar .navBar-title:hover{
+	animation-name: spin;
+	animation-duration: 3000ms;
+	animation-iteration-count: 1;
+	animation-timing-function: linear;
+}
+
+nav.navBar div.entry-div{
+	display: flex;
+	flex-direction: row;
+	justify-self: flex-end;
+	justify-content: space-around;
+}
+
+nav.navBar div.entry-div ul{
+	width: 30rem;
+	display: flex;
+	flex-direction: row;
+	justify-content: space-evenly;
+	list-style-type: none;
+}
+
+.entry-div ul li{
+	font-family: 'Kalam', cursive;
+	color: #FFD700;
+	font-size: 1.5em;
+	display: inline;
+	justify-self: flex-start;
+	align-self: center;
+}
+
+a{
+	text-decoration: none;
+	color: #FFD700;
+}
+
+a:hover{
+	background: -webkit-linear-gradient(red, blue);
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+}
+
+a:active{
+	color: whitesmoke;
+}
+
+/* ############################################# Media Query ########################################## */
+
+@media screen and (max-width: 768px){
+	nav.navBar{
+		flex-direction: column;
+		justify-content: center;
+	}
+
+	nav.navBar .navBar-title{
+		align-self: center;
+	}
+
+	nav.navBar div.entry-div ul{
+		justify-content: space-evenly;
+	}
+
+}
+
+@media screen and (min-width: 768px) and (max-width: 1024px){
+	
+}
+
+/* ############################################# Animation ############################################# */
+@keyframes spin {
+	from{
+		transform: rotateY(0deg);
+	}
+	to{
+		transform: rotateY(360deg);
+	}
+	
+}

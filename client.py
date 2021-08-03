@@ -1,24 +1,39 @@
 from json.decoder import JSONDecodeError
 import socket
 import threading
-from plyer import notification
+import time
+import plyer
 import json
+import re
+
 
 # A thread operated function continuously printing the server response
-def recieverThread(clientSocket):
+def recieverThread(clientSocket, myMessage):
 	while True:
 		recvdMsg = str(clientSocket.recv(1024).decode())
 		try:
 			recvdMsg = json.loads(recvdMsg)
-			notification.notify(
+			plyer.Fnotification.notify(
 				app_name = "Messenger",
 				app_icon = "./Icon/messenger_icon.ico",
 				title = recvdMsg['sender'],
 				message = recvdMsg['message'],
 				timeout = 1
 			)
+			if recvdMsg['online'] == 1:
+				print(recvdMsg['message'])
 		except JSONDecodeError:
-			print(recvdMsg)
+			recvdMsg = re.split(r"\*\|\*", recvdMsg)
+			if len(recvdMsg) > 1:
+				for chat in recvdMsg:
+					print(chat)
+			else:
+				print(recvdMsg[0])
+
+
+class Message:
+	def __init__(self):
+		self.message = None
 
 try:
 	# Creates a socket and if it fails, it will raise an error
@@ -37,8 +52,11 @@ try:
 except socket.error:
 	print("Failed to connect with error", socket.error)
 
+# Message object to pass changed message to reciever thread
+myMessage = Message()
+
 # Initiates recieverThread
-readT = threading.Thread(target=recieverThread, args=(clientSocket,))
+readT = threading.Thread(target=recieverThread, args=(clientSocket,myMessage,))
 readT.start()
 
 # To get online users, enter showOn
@@ -48,8 +66,8 @@ readT.start()
 # To get brief of new messages, checkNewMsgs 
 
 while True:
-	message = input()
-	clientSocket.send(message.encode())
-	if message == "_exit_":
+	myMessage.message = input()
+	clientSocket.send(myMessage.message.encode())
+	if myMessage.message == "_exit_":
 		print("Goodbye...")
 		quit()

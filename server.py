@@ -3,6 +3,9 @@ import socket
 import threading
 import psycopg2
 import select
+import json
+import os
+import time
 
 
 # A list to hold names of users those are online
@@ -128,9 +131,13 @@ def sign_in(clientIdentifier, dbConn):
 			dbConn.commit()
 	return username
 
+class DestClass:
+	def __init__(self, destclient):
+		self.destclient = destclient		
+
 # to continuously listen the database and notify the user if a new message is there for him
 # Execued within a separate thread
-def Notifier(username, clientIdentifier):
+def Notifier(username, clientIdentifier, destclient):
 	Conn = psycopg2.connect(database="messenger", user="postgres", password="12345678", host="localhost", port=5432)
 	Conn.autocommit = True
 	Cursor = Conn.cursor()
@@ -140,7 +147,12 @@ def Notifier(username, clientIdentifier):
 			Conn.poll()
 			while Conn.notifies:
 				notify = Conn.notifies.pop(0)
-				clientIdentifier.send(str(notify.payload).encode())
+				payload = str(notify.payload)
+				JSONpayload = json.loads(payload)
+				if JSONpayload['sender'] == destclient.destclient:
+					payload = payload[:-1] + """, "online": 1}"""
+					Cursor.execute(f"UPDATE {username} SET readreciept = 1;")
+				clientIdentifier.send(str(payload).encode())
 				Conn.commit()
 
 # Function to handle a particular client connection
@@ -166,15 +178,15 @@ def Application(clientIdentifier):
 	else:
 		print("Invalid option!!!\nPlease Try again")	
 		Application(clientIdentifier, 3)
-	
-	# Initiates Notifier thread
-	notifierThread = threading.Thread(target=Notifier, args=(userName, clientIdentifier,))
-	notifierThread.start()
 
 	# destclient is the client to whom message is supposed to be sent
 	# Its default value is user himself 
 	# To change it, use "change <username>" statement  
-	destclient = userName
+	destclient = DestClass(userName)
+
+	# Initiates Notifier thread
+	notifierThread = threading.Thread(target=Notifier, args=(userName, clientIdentifier, destclient))
+	notifierThread.start()
 
 	while True:
 
@@ -203,12 +215,29 @@ def Application(clientIdentifier):
 			allUsers = dbCursor.fetchall()
 			users = lambda x: [i[0] for i in x]
 			if recvdMsg.split()[1] in users(allUsers): 
-				destclient= recvdMsg.split()[1]
-				dbCursor.execute("SELECT COUNT(readreciept) FROM {} WHERE sender = '{}';".format(userName, destclient))
+				destclient.destclient = recvdMsg.split()[1]
+				dbCursor.execute("SELECT COUNT(readreciept) FROM {} WHERE sender = '{}';".format(userName, destclient.destclient))
 				msgsfromsender = int(dbCursor.fetchall()[0][0])
-				dbCursor.execute("UPDATE {} SET readreciept = 1 WHERE sender = '{}';".format(userName, destclient))
+				dbCursor.execute("UPDATE {} SET readreciept = 1 WHERE sender = '{}';".format(userName, destclient.destclient))
 				unreadMsgs -= msgsfromsender
 				unreadChats -= 1
+				dbCursor.execute(f"""CREATE TEMP TABLE chats AS
+				SELECT message, timestamp FROM {userName} where sender = '{destclient.destclient}';
+				
+			    INSERT INTO chats (message,timestamp)
+				SELECT message, timestamp
+				FROM {destclient.destclient} where sender = '{userName}';
+				
+				SELECT message FROM chats ORDER BY timestamp asc; 
+				""")
+				try:
+					chats = list(chat[0] for chat in dbCursor.fetchall())
+					chats = str('*|*'.join(chats))
+				except:
+					chats = f"Welcome!!!\nSay Hi to {destclient.destclient}"
+				time.sleep(2)
+				clientIdentifier.send(chats.encode())
+				dbCursor.execute("DROP TABLE chats;")
 				continue
 
 		# To close the connection
@@ -226,7 +255,7 @@ def Application(clientIdentifier):
 			continue
 		
 		# Each message is storeed in respective user's table
-		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', CURRENT_DATE, LOCALTIME, 0, LOCALTIMESTAMP)'''.format(destclient, userName, recvdMsg))
+		dbCursor.execute('''INSERT INTO {} VALUES ('{}', '{}', CURRENT_DATE, LOCALTIME, 0, LOCALTIMESTAMP)'''.format(destclient.destclient, userName, recvdMsg))
 		dbHandler.commit()
 
 try:
