@@ -4,6 +4,8 @@
 	box-sizing: border-box;
 }
 
+/* ######################################### NavBar ############################################## */
+
 nav.navBar{
 	display: flex;
 	width: 100vw;
@@ -68,6 +70,18 @@ a:active{
 	color: whitesmoke;
 }
 
+
+/* #############################################    Footer   ########################################### */
+
+footer{
+	background-color: aqua;
+	display: flex;
+	flex-direction: row;
+}
+
+div.footer-logo{
+	border: 1px red solid;
+}
 /* ############################################# Media Query ########################################## */
 
 @media screen and (max-width: 768px){
